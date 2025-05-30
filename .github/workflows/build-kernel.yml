@@ -1,0 +1,75 @@
+name: Build arter97 Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Setup Build Environment
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          build-essential bc bison flex libssl-dev libelf-dev \
+          fakeroot cpio lz4 python3-pip git wget \
+          device-tree-compiler clang llvm lld ccache
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Download mkbootimg.py
+      run: |
+        mkdir -p ~/.local/bin
+        wget -O ~/.local/bin/mkbootimg.py https://raw.githubusercontent.com/anestisb/android-unpackbootimg/master/mkbootimg.py
+        chmod +x ~/.local/bin/mkbootimg.py
+
+    - name: Patch Makefile toolchain paths
+      run: |
+        sed -i 's|/home/arter97/android/nathan/llvm-20.1.4-x86_64/bin/|/usr/bin/|g' Makefile
+        sed -i 's|/home/arter97/arm64-gcc/bin/aarch64-elf-|aarch64-linux-gnu-|g' Makefile
+        sed -i 's|/home/arter97/arm32-gcc/bin/arm-eabi-|arm-linux-gnueabihf-|g' Makefile
+
+    - name: Verify Essential Files
+      run: |
+        test -f build_kernel.sh || { echo "❌ build_kernel.sh not found"; exit 1; }
+        test -d ramdisk || { echo "❌ ramdisk directory not found"; exit 1; }
+        test -f defconfig || { echo "❌ defconfig not found"; exit 1; }
+        test -f version || { echo "❌ version file not found"; exit 1; }
+        which mkbootimg.py || { echo "❌ mkbootimg.py not found"; exit 1; }
+        echo "✅ All essential files verified"
+
+    - name: Build Kernel
+      run: |
+        chmod +x build_kernel.sh
+        chmod +x ramdisk_fix_permissions.sh 2>/dev/null || true
+
+        export CC="clang"
+        export LD="ld.lld"
+        export AR="llvm-ar"
+        export NM="llvm-nm"
+        export OBJCOPY="llvm-objcopy"
+        export OBJDUMP="llvm-objdump"
+        export STRIP="llvm-strip"
+        export ARCH=arm64
+        export CROSS_COMPILE="aarch64-linux-gnu-"
+        export CROSS_COMPILE_ARM32="arm-linux-gnueabihf-"
+        export CLANG_TRIPLE="aarch64-linux-gnu-"
+        export LLVM=1
+        export LLVM_IAS=1
+
+        ./build_kernel.sh
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-artifacts-${{ github.run_number }}
+        path: |
+          boot.img
+          arter97-kernel-*-boot.img
