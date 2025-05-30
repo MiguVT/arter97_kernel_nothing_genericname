@@ -1,18 +1,28 @@
-name: Build arter97 Kernel
+name: Build arter97 Kernel (master & kernelsu)
 
 on:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub Release with kernel images'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
-    name: Build Kernel
+    name: Build Kernels (master & kernelsu)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    strategy:
+      matrix:
+        branch: [master, kernelsu]
 
     steps:
-    - name: Checkout Repository
+    - name: Checkout ${{ matrix.branch }} branch
       uses: actions/checkout@v4
       with:
+        ref: ${{ matrix.branch }}
         fetch-depth: 1
 
     - name: Setup Build Environment
@@ -66,10 +76,67 @@ jobs:
 
         ./build_kernel.sh
 
-    - name: Upload Artifacts
+    - name: Upload Kernel Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-artifacts-${{ github.run_number }}
+        name: kernel-artifacts-${{ matrix.branch }}-${{ github.run_number }}
         path: |
-          boot.img
           arter97-kernel-*-boot.img
+          arter97-kernel-*-kernelsu-boot.img
+          boot.img
+      if: always()
+
+  release:
+    name: Create Combined Release
+    needs: build
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.inputs.create_release == 'true' }}
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Set current date as env variable
+      id: set_date
+      run: echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
+
+    - name: Find artifact filenames
+      id: find_artifacts
+      run: |
+        STD_KERNEL=$(find artifacts -name "arter97-kernel-*-boot.img" ! -name "*kernelsu*" | head -n1)
+        KSU_KERNEL=$(find artifacts -name "arter97-kernel-*-kernelsu-boot.img" | head -n1)
+        echo "STD_KERNEL=$STD_KERNEL" >> $GITHUB_ENV
+        echo "KSU_KERNEL=$KSU_KERNEL" >> $GITHUB_ENV
+        echo "STD_KERNEL_NAME=$(basename "$STD_KERNEL")" >> $GITHUB_ENV
+        echo "KSU_KERNEL_NAME=$(basename "$KSU_KERNEL")" >> $GITHUB_ENV
+
+    - name: Prepare release notes
+      run: |
+        echo "## arter97 Kernel Build" > release_notes.md
+        if [ -n "${STD_KERNEL_NAME}" ]; then
+          echo "- **Standard Kernel:** [Download here](https://github.com/${{ github.repository }}/releases/download/kernel-build-${{ github.run_number }}/${STD_KERNEL_NAME})" >> release_notes.md
+        fi
+        if [ -n "${KSU_KERNEL_NAME}" ]; then
+          echo "- **Kernel with KernelSU:** [Download here](https://github.com/${{ github.repository }}/releases/download/kernel-build-${{ github.run_number }}/${KSU_KERNEL_NAME})" >> release_notes.md
+        fi
+        echo "" >> release_notes.md
+        echo "### Build Information" >> release_notes.md
+        echo "- Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> release_notes.md
+        echo "- Run number: ${{ github.run_number }}" >> release_notes.md
+      env:
+        STD_KERNEL_NAME: ${{ env.STD_KERNEL_NAME }}
+        KSU_KERNEL_NAME: ${{ env.KSU_KERNEL_NAME }}
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: kernel-build-${{ github.run_number }}
+        name: arter97 Kernel Build ${{ github.run_number }}
+        body_path: release_notes.md
+        files: |
+          artifacts/**/arter97-kernel-*-boot.img
+          artifacts/**/arter97-kernel-*-kernelsu-boot.img
+          artifacts/**/boot.img
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
