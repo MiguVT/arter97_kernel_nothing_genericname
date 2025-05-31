@@ -34,10 +34,11 @@ jobs:
           device-tree-compiler clang llvm lld ccache
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    - name: Download mkbootimg.py
+    - name: Download mkbootimg.py from AOSP
       run: |
         mkdir -p ~/.local/bin
-        wget -O ~/.local/bin/mkbootimg.py https://raw.githubusercontent.com/anestisb/android-unpackbootimg/master/mkbootimg.py
+        wget -O ~/.local/bin/mkbootimg.py https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master/mkbootimg.py?format=TEXT
+        base64 -d ~/.local/bin/mkbootimg.py > ~/.local/bin/mkbootimg.tmp && mv ~/.local/bin/mkbootimg.tmp ~/.local/bin/mkbootimg.py
         chmod +x ~/.local/bin/mkbootimg.py
 
     - name: Patch Makefile toolchain paths
